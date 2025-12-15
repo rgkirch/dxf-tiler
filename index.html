@@ -3,11 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fusion 360 DXF Tiler v12 (Dimensions Restored)</title>
+    <title>Fusion 360 DXF Tiler v13 (Shareable)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://unpkg.com/dxf-parser@1.1.2/dist/dxf-parser.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- Pako for GZIP compression to make URLs shorter -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -22,12 +24,26 @@
 <body class="bg-slate-50 min-h-screen text-slate-800 pattern-bg">
 
     <div id="app" class="max-w-5xl mx-auto p-4 md:p-8">
-        <div class="mb-8 text-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+        <div class="mb-8 text-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative">
             <h1 class="text-3xl font-bold text-slate-900 mb-2 flex items-center justify-center gap-3">
                 <i data-lucide="printer" class="w-8 h-8 text-blue-600"></i>
                 Fusion 360 DXF Tiler
             </h1>
-            <p class="text-slate-600">Convert CAD sketches to tiled PDFs. <span class="text-indigo-600 font-semibold text-xs bg-indigo-50 px-2 py-1 rounded-full">v12 Dimensions Restored</span></p>
+            <p class="text-slate-600">Convert CAD sketches to tiled PDFs. <span class="text-cyan-600 font-semibold text-xs bg-cyan-50 px-2 py-1 rounded-full">v13 Shareable</span></p>
+            
+            <button id="shareBtn" class="absolute top-6 right-6 text-slate-400 hover:text-blue-600 transition-colors hidden" title="Share Design URL">
+                <i data-lucide="share-2" class="w-6 h-6"></i>
+            </button>
+        </div>
+
+        <div id="loadingOverlay" class="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+            <div class="bg-white p-6 rounded-xl shadow-2xl border border-slate-200 text-center">
+                <div class="animate-spin text-blue-600 mb-4 mx-auto w-8 h-8">
+                    <i data-lucide="loader-2" class="w-8 h-8"></i>
+                </div>
+                <h3 class="text-lg font-bold text-slate-800">Loading Shared Design...</h3>
+                <p class="text-sm text-slate-500">Decompressing geometry data</p>
+            </div>
         </div>
 
         <div class="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
@@ -213,7 +229,9 @@
             skipBlank: document.getElementById('skipBlank'),
             forceBlack: document.getElementById('forceBlack'),
             marginLabels: document.getElementById('marginLabels'),
-            debugMode: document.getElementById('debugMode')
+            debugMode: document.getElementById('debugMode'),
+            shareBtn: document.getElementById('shareBtn'),
+            loadingOverlay: document.getElementById('loadingOverlay')
         };
 
         els.fileInput.addEventListener('change', handleFileSelect);
@@ -223,49 +241,128 @@
         els.scale.addEventListener('input', updatePreview);
         els.lineWidth.addEventListener('input', (e) => els.lineWidthVal.textContent = e.target.value);
         els.generateBtn.addEventListener('click', generatePDF);
+        els.shareBtn.addEventListener('click', shareDesign);
+
+        // --- URL SHARING LOGIC ---
+        window.addEventListener('load', checkForSharedUrl);
+
+        function checkForSharedUrl() {
+            const params = new URLSearchParams(window.location.search);
+            const sharedData = params.get('dxf');
+            if (sharedData) {
+                els.loadingOverlay.classList.remove('hidden');
+                
+                // Slight delay to allow UI to render
+                setTimeout(() => {
+                    try {
+                        // 1. Base64 Decode
+                        const binaryString = atob(sharedData);
+                        // 2. Convert to Uint8Array
+                        const charData = binaryString.split('').map(x => x.charCodeAt(0));
+                        const binData = new Uint8Array(charData);
+                        // 3. Gunzip
+                        const decompressed = pako.ungzip(binData, { to: 'string' });
+                        
+                        // Load it
+                        dxfContent = decompressed;
+                        processLoadedDxf("shared_design.dxf");
+                        
+                        // Clean URL
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                    } catch (e) {
+                        console.error(e);
+                        alert("Failed to load shared design. Link might be broken or too old.");
+                    } finally {
+                        els.loadingOverlay.classList.add('hidden');
+                    }
+                }, 100);
+            }
+        }
+
+        async function shareDesign() {
+            if (!dxfContent) return;
+            
+            try {
+                // 1. Gzip
+                const compressed = pako.gzip(dxfContent);
+                // 2. Base64 (using FileReader for robust binary to b64)
+                // Actually, simple btoa on Uint8Array is tricky. 
+                // Let's use a helper for binary -> b64 string
+                const binaryString = Array.from(compressed, byte => String.fromCharCode(byte)).join('');
+                const b64 = btoa(binaryString);
+                
+                const baseUrl = window.location.href.split('?')[0];
+                const fullUrl = `${baseUrl}?dxf=${b64}`;
+                
+                // URL Length Warning
+                if (fullUrl.length > 8000) {
+                    if (!confirm("This design is quite large. The sharing link might not work in all browsers/messengers. Create link anyway?")) {
+                        return;
+                    }
+                }
+
+                await navigator.clipboard.writeText(fullUrl);
+                
+                // Visual feedback
+                const origIcon = els.shareBtn.innerHTML;
+                els.shareBtn.innerHTML = `<i data-lucide="check" class="w-6 h-6 text-green-500"></i>`;
+                setTimeout(() => els.shareBtn.innerHTML = origIcon, 2000);
+                alert("Link copied to clipboard!");
+                
+            } catch (e) {
+                console.error(e);
+                alert("Could not create share link.");
+            }
+        }
 
         function handleFileSelect(event) {
             const file = event.target.files[0];
             if (!file) return;
-
-            els.fileName.textContent = file.name;
-            els.uploadPlaceholder.classList.add('hidden');
-            els.fileInfo.classList.remove('hidden');
-            els.fileStats.textContent = "Analyzing structure...";
-            
-            if (typeof window.DxfParser === 'undefined') {
-                alert("DXF Parser library missing.");
-                return;
-            }
-            
-            dxfParser = new window.DxfParser();
             
             const reader = new FileReader();
             reader.onload = function(e) {
-                try {
-                    dxfContent = e.target.result;
-                    parsedDxf = dxfParser.parseSync(dxfContent);
-                    els.fileStats.textContent = `Ready to print.`;
-                    updatePreview();
-                    
-                    els.generateBtn.disabled = false;
-                    els.generateBtn.classList.remove('bg-slate-300', 'text-slate-500');
-                    els.generateBtn.classList.add('bg-blue-600', 'text-white', 'hover:bg-blue-700', 'shadow-xl');
-                } catch(err) {
-                    console.error(err);
-                    els.fileStats.textContent = "Error parsing file.";
-                }
+                dxfContent = e.target.result;
+                processLoadedDxf(file.name);
             };
             reader.readAsText(file);
         }
 
+        function processLoadedDxf(filename) {
+            try {
+                if (typeof window.DxfParser === 'undefined') {
+                    alert("DXF Parser library missing.");
+                    return;
+                }
+                
+                if(!dxfParser) dxfParser = new window.DxfParser();
+                parsedDxf = dxfParser.parseSync(dxfContent);
+                
+                // Update UI
+                els.fileName.textContent = filename;
+                els.uploadPlaceholder.classList.add('hidden');
+                els.fileInfo.classList.remove('hidden');
+                els.fileStats.textContent = "Ready.";
+                els.shareBtn.classList.remove('hidden');
+                
+                els.generateBtn.disabled = false;
+                els.generateBtn.classList.remove('bg-slate-300', 'text-slate-500');
+                els.generateBtn.classList.add('bg-blue-600', 'text-white', 'hover:bg-blue-700', 'shadow-xl');
+                
+                updatePreview();
+                lucide.createIcons(); // Refresh new icons
+            } catch(err) {
+                console.error(err);
+                alert("Error parsing DXF file.");
+            }
+        }
+
+        // --- [PRESERVED: GEOMETRY ENGINE V12] ---
+        
         function safeAngle(a) {
-            // Normalize to radians if > 2PI
             if (Math.abs(a) > 6.28318) return a * (Math.PI / 180);
             return a;
         }
 
-        // --- PRECISE ENTITY BOUNDING BOX LOGIC ---
         function getEntityBBox(ent, transform) {
             const tx = (x) => (x * transform.scaleX) + transform.x;
             const ty = (y) => (y * transform.scaleY) + transform.y;
@@ -292,10 +389,8 @@
                     const r = ent.radius;
                     const cx = ent.center.x;
                     const cy = ent.center.y;
-                    
                     update(cx + r * Math.cos(start), cy + r * Math.sin(start));
                     update(cx + r * Math.cos(end), cy + r * Math.sin(end));
-                    
                     if (end < start) end += Math.PI * 2;
                     const checkAngle = (a) => {
                         while(a < start) a += Math.PI * 2;
@@ -309,21 +404,16 @@
             return { minX, minY, maxX, maxY };
         }
 
-        // --- GLOBAL BBOX ---
         function getGlobalBBox(entities, blocks, transform = {x:0, y:0, scaleX:1, scaleY:1}) {
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
             let hasGeo = false;
-            
             if(!entities) return null;
-
             entities.forEach(ent => {
                 if(ent.type === 'INSERT' && blocks && blocks[ent.name]) {
                     const block = blocks[ent.name];
                     const subTransform = {
-                        x: transform.x + ent.position.x,
-                        y: transform.y + ent.position.y,
-                        scaleX: transform.scaleX * (ent.xScale || 1),
-                        scaleY: transform.scaleY * (ent.yScale || 1)
+                        x: transform.x + ent.position.x, y: transform.y + ent.position.y,
+                        scaleX: transform.scaleX * (ent.xScale || 1), scaleY: transform.scaleY * (ent.yScale || 1)
                     };
                     const bBox = getGlobalBBox(block.entities, blocks, subTransform);
                     if(bBox) {
@@ -340,23 +430,19 @@
                     }
                 }
             });
-
             if (!hasGeo) return null;
             return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY };
         }
 
-        // --- CALCULATE ACTIVE TILES ---
         function calculateActiveTiles(bbox, scale, stepX, stepY, marginPts, printableW, printableH, globalShiftX, globalShiftY, entities, blocks) {
             const cols = Math.max(1, Math.ceil((bbox.w * scale) / stepX));
             const rows = Math.max(1, Math.ceil((bbox.h * scale) / stepY));
-            
             let flatEntities = [];
             const addCollision = (ent, transform) => {
                 const tx = (x) => (x * transform.scaleX) + transform.x;
                 const ty = (y) => (y * transform.scaleY) + transform.y;
                 const toPdfX = (x) => (tx(x) * scale) + globalShiftX;
-                const toPdfY = (y) => globalShiftY - (ty(y) * scale); // PDF Y flip
-                
+                const toPdfY = (y) => globalShiftY - (ty(y) * scale);
                 const addBox = (p1, p2) => {
                     const x1 = toPdfX(p1.x), y1 = toPdfY(p1.y);
                     const x2 = toPdfX(p2.x), y2 = toPdfY(p2.y);
@@ -365,7 +451,6 @@
                         minY: Math.min(y1, y2), maxY: Math.max(y1, y2)
                     });
                 };
-
                 try {
                     if(ent.type === 'LINE') {
                         const segs = 10; 
@@ -375,25 +460,19 @@
                             const p2 = { x: ent.vertices[0].x + (ent.vertices[1].x - ent.vertices[0].x)*t2, y: ent.vertices[0].y + (ent.vertices[1].y - ent.vertices[0].y)*t2 };
                             addBox(p1, p2);
                         }
-                    } 
-                    else if (ent.type === 'LWPOLYLINE' || ent.type === 'POLYLINE') {
+                    } else if (ent.type === 'LWPOLYLINE' || ent.type === 'POLYLINE') {
                         if(!ent.vertices || ent.vertices.length < 2) return;
                         for(let i=0; i<ent.vertices.length; i++) {
                             let nextIdx = (i + 1) % ent.vertices.length;
                             if (nextIdx === 0 && !ent.closed && !ent.shape) continue;
-                            const p1 = ent.vertices[i];
-                            const p2 = ent.vertices[nextIdx];
+                            const p1 = ent.vertices[i]; const p2 = ent.vertices[nextIdx];
                             addBox(p1, p2);
                         }
-                    }
-                    else if (ent.type === 'ARC' || ent.type === 'CIRCLE') {
+                    } else if (ent.type === 'ARC' || ent.type === 'CIRCLE') {
                         let start = ent.startAngle || 0;
                         let end = ent.endAngle || (Math.PI*2);
                         if(ent.type === 'CIRCLE') end = Math.PI*2;
-                        else {
-                            start = safeAngle(start); end = safeAngle(end);
-                            if(end < start) end += Math.PI*2;
-                        }
+                        else { start = safeAngle(start); end = safeAngle(end); if(end < start) end += Math.PI*2; }
                         const segs = 16;
                         for(let i=0; i<segs; i++) {
                             const t1 = start + (end-start)*(i/segs);
@@ -405,26 +484,17 @@
                     }
                 } catch(e) {}
             };
-            
             const flatten = (entities, blocks, transform) => {
                 if(!entities) return;
                 entities.forEach(ent => {
                     if(ent.type === 'INSERT' && blocks && blocks[ent.name]) {
                         const block = blocks[ent.name];
-                        const subTransform = {
-                            x: transform.x + ent.position.x,
-                            y: transform.y + ent.position.y,
-                            scaleX: transform.scaleX * (ent.xScale || 1),
-                            scaleY: transform.scaleY * (ent.yScale || 1)
-                        };
+                        const subTransform = { x: transform.x + ent.position.x, y: transform.y + ent.position.y, scaleX: transform.scaleX * (ent.xScale || 1), scaleY: transform.scaleY * (ent.yScale || 1) };
                         flatten(block.entities, blocks, subTransform);
-                    } else {
-                        addCollision(ent, transform);
-                    }
+                    } else { addCollision(ent, transform); }
                 });
             };
             flatten(entities, blocks, {x:0, y:0, scaleX:1, scaleY:1});
-
             let activeCount = 0;
             for(let r=0; r<rows; r++) {
                 for(let c=0; c<cols; c++) {
@@ -432,10 +502,7 @@
                     const tileWindowMaxX = tileWindowMinX + printableW;
                     const tileWindowMinY = r * stepY + marginPts;
                     const tileWindowMaxY = tileWindowMinY + printableH;
-                    
-                    const hasContent = flatEntities.some(e => {
-                        return !(e.maxX < tileWindowMinX || e.minX > tileWindowMaxX || e.maxY < tileWindowMinY || e.minY > tileWindowMaxY);
-                    });
+                    const hasContent = flatEntities.some(e => { return !(e.maxX < tileWindowMinX || e.minX > tileWindowMaxX || e.maxY < tileWindowMinY || e.minY > tileWindowMaxY); });
                     if(hasContent) activeCount++;
                 }
             }
@@ -444,45 +511,34 @@
 
         function updatePreview() {
             if (!parsedDxf) return;
-
             const unit = els.sourceUnit.value;
             const conversionFactor = UNITS[unit]; 
             const userScale = (parseFloat(els.scale.value) || 100) / 100;
-            
             const bbox = getGlobalBBox(parsedDxf.entities, parsedDxf.blocks) || {minX:0, minY:0, maxX:1, maxY:1, w:1, h:1};
-
             const widthIn = (bbox.w * conversionFactor) / 72;
             const heightIn = (bbox.h * conversionFactor) / 72;
             const widthMm = widthIn * 25.4;
             const heightMm = heightIn * 25.4;
-
             els.dims.innerHTML = `${widthIn.toFixed(2)}" x ${heightIn.toFixed(2)}" <span class="text-slate-400 text-xs">(${widthMm.toFixed(0)}mm x ${heightMm.toFixed(0)}mm)</span>`;
             
             const paperKey = els.paperSize.value;
             let paperPts = PAPERS[paperKey];
             const orient = els.orientation.value;
-            if (orient === 'l' || (orient === 'auto' && paperPts[0] < paperPts[1])) { 
-                 if (orient === 'l' && paperPts[0] < paperPts[1]) paperPts = [paperPts[1], paperPts[0]];
-            }
+            if (orient === 'l' || (orient === 'auto' && paperPts[0] < paperPts[1])) { if (orient === 'l' && paperPts[0] < paperPts[1]) paperPts = [paperPts[1], paperPts[0]]; }
             let pw = paperPts[0], ph = paperPts[1];
             if (orient === 'l') { pw = Math.max(paperPts[0], paperPts[1]); ph = Math.min(paperPts[0], paperPts[1]); }
             if (orient === 'p') { pw = Math.min(paperPts[0], paperPts[1]); ph = Math.max(paperPts[0], paperPts[1]); }
             if (orient === 'auto') { pw = paperPts[0]; ph = paperPts[1]; } 
-
             const marginPts = 18;
             const overlapPts = 0.5 * 72; 
             const printableW = pw - (marginPts * 2);
             const printableH = ph - (marginPts * 2);
             const stepX = printableW - overlapPts;
             const stepY = printableH - overlapPts;
-            
             const scale = conversionFactor * userScale;
-            // PDF alignment
             const globalShiftX = marginPts - (bbox.minX * scale);
             const globalShiftY = marginPts + (bbox.maxY * scale);
-
             const result = calculateActiveTiles(bbox, scale, stepX, stepY, marginPts, printableW, printableH, globalShiftX, globalShiftY, parsedDxf.entities, parsedDxf.blocks);
-            
             els.pageCount.innerHTML = `<span class="text-indigo-600">${result.activeCount} Pages</span> <span class="text-base font-normal text-slate-400">(Grid: ${result.cols} x ${result.rows})</span>`;
             els.previewArea.classList.remove('hidden');
         }
@@ -496,188 +552,102 @@
             const userScale = (parseFloat(els.scale.value) || 100) / 100;
             const conversionFactor = UNITS[unit];
             let paperPts = PAPERS[paperKey]; 
-            
-            // Handle Orientation
             let finalOrient = 'p';
             let pw = paperPts[0], ph = paperPts[1];
-            if (orient === 'l') { 
-                pw = Math.max(paperPts[0], paperPts[1]); 
-                ph = Math.min(paperPts[0], paperPts[1]); 
-                finalOrient = 'l';
-            } else if (orient === 'p') {
-                pw = Math.min(paperPts[0], paperPts[1]); 
-                ph = Math.max(paperPts[0], paperPts[1]);
-                finalOrient = 'p';
-            } else {
-                // Auto: use paper default, usually portrait
-                finalOrient = paperPts[0] > paperPts[1] ? 'l' : 'p';
-                pw = paperPts[0]; ph = paperPts[1];
-            }
-
+            if (orient === 'l') { pw = Math.max(paperPts[0], paperPts[1]); ph = Math.min(paperPts[0], paperPts[1]); finalOrient = 'l'; } 
+            else if (orient === 'p') { pw = Math.min(paperPts[0], paperPts[1]); ph = Math.max(paperPts[0], paperPts[1]); finalOrient = 'p'; } 
+            else { finalOrient = paperPts[0] > paperPts[1] ? 'l' : 'p'; pw = paperPts[0]; ph = paperPts[1]; }
             const marginPts = 18; 
             const overlapPts = overlapInches * 72;
             const printableW = pw - (marginPts * 2);
             const printableH = ph - (marginPts * 2);
             const stepX = printableW - overlapPts;
             const stepY = printableH - overlapPts;
-            
             const skipBlank = els.skipBlank.checked;
             const forceBlack = els.forceBlack.checked;
             const debugMode = els.debugMode.checked;
             const marginLabels = els.marginLabels.checked;
             const lineWidth = parseFloat(els.lineWidth.value) || 1.0;
-
             const bbox = getGlobalBBox(parsedDxf.entities, parsedDxf.blocks);
             const scale = conversionFactor * userScale;
-
-            const doc = new jsPDF({
-                orientation: finalOrient,
-                unit: 'pt',
-                format: paperKey
-            });
-
+            const doc = new jsPDF({ orientation: finalOrient, unit: 'pt', format: paperKey });
             const globalShiftX = marginPts - (bbox.minX * scale);
             const globalShiftY = marginPts + (bbox.maxY * scale);
-
-            // Re-calculate layout & active tiles (reuse preview logic basically)
             const layout = calculateActiveTiles(bbox, scale, stepX, stepY, marginPts, printableW, printableH, globalShiftX, globalShiftY, parsedDxf.entities, parsedDxf.blocks);
             const flatEntities = layout.flatEntities;
             const rows = layout.rows;
             const cols = layout.cols;
-
             let realPagesGenerated = 0;
-
             for(let r=0; r<rows; r++) {
                 for(let c=0; c<cols; c++) {
                     const tileShiftX = c * stepX;
                     const tileShiftY = r * stepY;
                     const finalShiftX = globalShiftX - tileShiftX;
                     const finalShiftY = globalShiftY - tileShiftY;
-                    
                     if(skipBlank) {
                         const tileWindowMinX = c * stepX + marginPts;
                         const tileWindowMaxX = tileWindowMinX + printableW;
                         const tileWindowMinY = r * stepY + marginPts;
                         const tileWindowMaxY = tileWindowMinY + printableH;
-                        
-                        const hasContent = flatEntities.some(e => {
-                            return !(e.maxX < tileWindowMinX || 
-                                     e.minX > tileWindowMaxX || 
-                                     e.maxY < tileWindowMinY || 
-                                     e.minY > tileWindowMaxY);
-                        });
-                        
+                        const hasContent = flatEntities.some(e => { return !(e.maxX < tileWindowMinX || e.minX > tileWindowMaxX || e.maxY < tileWindowMinY || e.minY > tileWindowMaxY); });
                         if(!hasContent) continue;
                     }
-
                     if (realPagesGenerated > 0) doc.addPage();
                     realPagesGenerated++;
-
                     doc.saveGraphicsState();
-                    
-                    drawEntitiesRecursive(doc, parsedDxf.entities, parsedDxf.blocks, {
-                        scale: scale,
-                        shiftX: finalShiftX,
-                        shiftY: finalShiftY,
-                        currentX: 0, currentY: 0, scaleX: 1, scaleY: 1,
-                        forceBlack: forceBlack,
-                        lineWidth: lineWidth
-                    });
-
-                    // Debug Overlay
+                    drawEntitiesRecursive(doc, parsedDxf.entities, parsedDxf.blocks, { scale: scale, shiftX: finalShiftX, shiftY: finalShiftY, currentX: 0, currentY: 0, scaleX: 1, scaleY: 1, forceBlack: forceBlack, lineWidth: lineWidth });
                     if (debugMode) {
-                        doc.setDrawColor(255, 0, 0);
-                        doc.setLineWidth(1);
-                        const bx = (bbox.minX * scale) + finalShiftX;
-                        const by_max = finalShiftY - (bbox.maxY * scale);
-                        const bw = bbox.w * scale;
-                        const bh = bbox.h * scale;
+                        doc.setDrawColor(255, 0, 0); doc.setLineWidth(1);
+                        const bx = (bbox.minX * scale) + finalShiftX; const by_max = finalShiftY - (bbox.maxY * scale);
+                        const bw = bbox.w * scale; const bh = bbox.h * scale;
                         doc.rect(bx, by_max, bw, bh);
-                        doc.setDrawColor(0, 0, 255);
-                        doc.line(0,0, pw, ph);
+                        doc.setDrawColor(0, 0, 255); doc.line(0,0, pw, ph);
                     }
-
                     doc.restoreGraphicsState();
-
                     drawGuides(doc, marginPts, printableW, printableH);
-                    
-                    doc.setFontSize(8);
-                    doc.setTextColor(150);
+                    doc.setFontSize(8); doc.setTextColor(150);
                     const labelText = `Row ${r+1}/${rows}, Col ${c+1}/${cols}`;
-                    if(marginLabels) {
-                        // Print in margin (top left outside cut line)
-                        doc.text(labelText, marginPts, marginPts - 5);
-                    } else {
-                        // Print inside
-                        doc.text(labelText, marginPts + 10, printableH + marginPts - 10);
-                    }
+                    if(marginLabels) { doc.text(labelText, marginPts, marginPts - 5); } else { doc.text(labelText, marginPts + 10, printableH + marginPts - 10); }
                 }
             }
-            
-            if(realPagesGenerated === 0) {
-                alert("No pages generated! Check settings.");
-            } else {
-                doc.save(`Tiled_${els.fileName.textContent.replace('.dxf','')}.pdf`);
-            }
+            if(realPagesGenerated === 0) { alert("No pages generated! Check settings."); } else { doc.save(`Tiled_${els.fileName.textContent.replace('.dxf','')}.pdf`); }
         }
 
         function drawEntitiesRecursive(doc, entities, blocks, ctx) {
             if(!entities) return;
             doc.setLineWidth(ctx.lineWidth); 
             if(ctx.forceBlack) doc.setDrawColor(0, 0, 0);
-
             const trX = (x) => ((x * ctx.scaleX + ctx.currentX) * ctx.scale) + ctx.shiftX;
             const trY = (y) => ctx.shiftY - ((y * ctx.scaleY + ctx.currentY) * ctx.scale);
-
             entities.forEach(ent => {
                 try {
-                    if(ent.type === 'LINE') {
-                        doc.line(trX(ent.vertices[0].x), trY(ent.vertices[0].y), trX(ent.vertices[1].x), trY(ent.vertices[1].y));
-                    }
+                    if(ent.type === 'LINE') { doc.line(trX(ent.vertices[0].x), trY(ent.vertices[0].y), trX(ent.vertices[1].x), trY(ent.vertices[1].y)); }
                     else if(ent.type === 'LWPOLYLINE' || ent.type === 'POLYLINE') {
                         if(!ent.vertices || ent.vertices.length < 2) return;
                         for(let i=0; i<ent.vertices.length; i++) {
                             let nextIdx = (i + 1) % ent.vertices.length;
                             if (nextIdx === 0 && !ent.closed && !ent.shape) continue;
-
-                            const p1 = ent.vertices[i];
-                            const p2 = ent.vertices[nextIdx];
-                            
+                            const p1 = ent.vertices[i]; const p2 = ent.vertices[nextIdx];
                             if (typeof p1.bulge === 'number' && p1.bulge !== 0) {
-                                // CRITICAL FIX: Invert bulge sign because PDF coordinate system (Y-down) 
-                                // is flipped relative to DXF (Y-up). This fixes "inverted fillets".
                                 const b = p1.bulge * -1;
                                 const x1 = trX(p1.x), y1 = trY(p1.y);
                                 const x2 = trX(p2.x), y2 = trY(p2.y);
-                                const dx = x2 - x1;
-                                const dy = y2 - y1;
+                                const dx = x2 - x1; const dy = y2 - y1;
                                 const chord = Math.sqrt(dx*dx + dy*dy);
                                 if(chord < 0.1) continue;
-
                                 const radius = chord * (1 + b*b) / (4 * Math.abs(b));
                                 const theta = 4 * Math.atan(b);
-                                const midX = (x1 + x2) / 2;
-                                const midY = (y1 + y2) / 2;
-                                
-                                const perpX = -dy;
-                                const perpY = dx;
+                                const midX = (x1 + x2) / 2; const midY = (y1 + y2) / 2;
+                                const perpX = -dy; const perpY = dx;
                                 const len = Math.sqrt(perpX*perpX + perpY*perpY);
-                                const nx = perpX/len;
-                                const ny = perpY/len;
-                                
+                                const nx = perpX/len; const ny = perpY/len;
                                 const halfChord = chord / 2;
                                 const distToC = halfChord * ( (1 - b*b) / (2*b) );
-                                
-                                const cx = midX + nx * distToC;
-                                const cy = midY + ny * distToC;
-                                
+                                const cx = midX + nx * distToC; const cy = midY + ny * distToC;
                                 const segments = Math.max(4, Math.ceil(Math.abs(theta) * 10));
                                 const startAng = Math.atan2(y1 - cy, x1 - cx);
                                 let endAng = Math.atan2(y2 - cy, x2 - cx);
-                                
-                                if (b > 0) { if (endAng < startAng) endAng += Math.PI * 2; } 
-                                else { if (endAng > startAng) endAng -= Math.PI * 2; }
-                                
+                                if (b > 0) { if (endAng < startAng) endAng += Math.PI * 2; } else { if (endAng > startAng) endAng -= Math.PI * 2; }
                                 let prevX = x1, prevY = y1;
                                 for(let k=1; k<=segments; k++) {
                                     const t = k / segments;
@@ -687,17 +657,13 @@
                                     doc.line(prevX, prevY, px, py);
                                     prevX = px; prevY = py;
                                 }
-                            } else {
-                                doc.line(trX(p1.x), trY(p1.y), trX(p2.x), trY(p2.y));
-                            }
+                            } else { doc.line(trX(p1.x), trY(p1.y), trX(p2.x), trY(p2.y)); }
                         }
                     }
                     else if(ent.type === 'ARC') {
-                        let start = safeAngle(ent.startAngle);
-                        let end = safeAngle(ent.endAngle);
+                        let start = safeAngle(ent.startAngle); let end = safeAngle(ent.endAngle);
                         if (end < start) end += Math.PI * 2;
-                        const segments = 24; 
-                        let lastX=null, lastY=null;
+                        const segments = 24; let lastX=null, lastY=null;
                         for(let i=0; i<=segments; i++) {
                             const theta = start + (end-start) * (i/segments);
                             const px = trX(ent.center.x + ent.radius * Math.cos(theta));
@@ -706,17 +672,9 @@
                             lastX = px; lastY = py;
                         }
                     }
-                    else if(ent.type === 'CIRCLE') {
-                        doc.circle(trX(ent.center.x), trY(ent.center.y), ent.radius * ctx.scale * ctx.scaleX, 'S');
-                    }
+                    else if(ent.type === 'CIRCLE') { doc.circle(trX(ent.center.x), trY(ent.center.y), ent.radius * ctx.scale * ctx.scaleX, 'S'); }
                     else if(ent.type === 'INSERT' && blocks && blocks[ent.name]) {
-                        const newCtx = {
-                            ...ctx,
-                            currentX: ctx.currentX + (ent.position.x * ctx.scaleX),
-                            currentY: ctx.currentY + (ent.position.y * ctx.scaleY),
-                            scaleX: ctx.scaleX * (ent.xScale || 1),
-                            scaleY: ctx.scaleY * (ent.yScale || 1)
-                        };
+                        const newCtx = { ...ctx, currentX: ctx.currentX + (ent.position.x * ctx.scaleX), currentY: ctx.currentY + (ent.position.y * ctx.scaleY), scaleX: ctx.scaleX * (ent.xScale || 1), scaleY: ctx.scaleY * (ent.yScale || 1) };
                         drawEntitiesRecursive(doc, blocks[ent.name].entities, blocks, newCtx);
                     }
                 } catch(e) { }
@@ -724,12 +682,9 @@
         }
 
         function drawGuides(doc, margin, w, h) {
-            doc.setDrawColor(220, 38, 38); 
-            doc.setLineWidth(0.5);
-            doc.setLineDash([4, 4], 0);
+            doc.setDrawColor(220, 38, 38); doc.setLineWidth(0.5); doc.setLineDash([4, 4], 0);
             doc.rect(margin, margin, w, h);
-            doc.setLineDash([], 0);
-            doc.setDrawColor(0, 0, 0);
+            doc.setLineDash([], 0); doc.setDrawColor(0, 0, 0);
             const l = 10;
             const x1=margin, x2=margin+w, y1=margin, y2=margin+h;
             doc.line(x1-l, y1, x1+l, y1); doc.line(x1, y1-l, x1, y1+l);
