@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fusion 360 DXF Tiler v15 (Thumbnail Preview)</title>
+    <title>Fusion 360 DXF Tiler v20 (Robust Fix)</title>
     <!-- Tailwind CDN is used for single-file portability. Warning in console is expected/safe for this tool. -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
@@ -28,11 +28,16 @@
                 <i data-lucide="printer" class="w-8 h-8 text-blue-600"></i>
                 Fusion 360 DXF Tiler
             </h1>
-            <p class="text-slate-600">Convert CAD sketches to tiled PDFs. <span class="text-violet-600 font-semibold text-xs bg-violet-50 px-2 py-1 rounded-full">v15 Thumbnail Preview</span></p>
-
-            <button id="shareBtn" class="absolute top-6 right-6 text-slate-400 hover:text-blue-600 transition-colors hidden" title="Share Design URL">
-                <i data-lucide="share-2" class="w-6 h-6"></i>
-            </button>
+            <p class="text-slate-600">Convert CAD sketches to tiled PDFs. <span class="text-emerald-600 font-semibold text-xs bg-emerald-50 px-2 py-1 rounded-full">v20 Robust Fix</span></p>
+            
+            <div class="absolute top-6 right-6 flex gap-2">
+                <button id="downloadSourceBtn" class="text-slate-400 hover:text-blue-600 transition-colors hidden" title="Download Source DXF">
+                    <i data-lucide="download" class="w-6 h-6"></i>
+                </button>
+                <button id="shareBtn" class="text-slate-400 hover:text-blue-600 transition-colors hidden" title="Share Design URL">
+                    <i data-lucide="share-2" class="w-6 h-6"></i>
+                </button>
+            </div>
         </div>
 
         <div id="loadingOverlay" class="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center hidden">
@@ -58,7 +63,7 @@
 
                 <div class="group border-2 border-dashed border-slate-300 rounded-xl p-10 text-center hover:bg-blue-50/50 hover:border-blue-400 transition-all relative cursor-pointer">
                     <input type="file" id="dxfInput" accept=".dxf" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
-
+                    
                     <div id="uploadPlaceholder" class="transition-opacity duration-200">
                         <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
                             <i data-lucide="upload-cloud" class="w-8 h-8"></i>
@@ -71,13 +76,18 @@
                             <i data-lucide="check" class="w-8 h-8"></i>
                         </div>
                         <p class="text-slate-900 font-bold text-xl" id="fileName">filename.dxf</p>
-                        <p class="text-sm text-slate-500 mt-1 mb-6 font-mono bg-slate-100 inline-block px-3 py-1 rounded-md" id="fileStats">Parsing...</p>
-
-                        <!-- Thumbnail Container -->
-                        <div id="thumbnailContainer" class="w-full max-w-sm h-48 border border-slate-200 rounded-lg bg-slate-50 flex items-center justify-center overflow-hidden relative">
-                            <canvas id="thumbnailCanvas" class="max-w-full max-h-full"></canvas>
-                            <div class="absolute bottom-2 right-2 bg-white/80 px-2 py-1 text-xs rounded text-slate-500 font-mono">Preview</div>
+                        <p class="text-sm font-bold text-indigo-600 mt-1 mb-1" id="origDims">-- x --</p>
+                        <p class="text-xs text-slate-400 mb-6 font-mono bg-slate-50 inline-block px-2 py-1 rounded">Original Size (Unscaled)</p>
+                        
+                        <div id="thumbnailContainer" class="w-full max-w-lg h-64 border border-slate-200 rounded-lg bg-slate-50 flex items-center justify-center overflow-hidden relative">
+                            <canvas id="thumbnailCanvas" class="absolute inset-0 w-full h-full"></canvas>
+                            <canvas id="gridCanvas" class="absolute inset-0 w-full h-full pointer-events-none"></canvas>
+                            <div class="absolute bottom-2 right-2 bg-white/90 px-2 py-1 text-xs rounded text-slate-600 font-mono border border-slate-200 shadow-sm flex items-center gap-2">
+                                <span class="w-2 h-2 rounded-full bg-blue-600 inline-block"></span> Geometry
+                                <span class="w-2 h-2 rounded-full bg-red-400 inline-block ml-2"></span> Pages
+                            </div>
                         </div>
+                        <p id="fileStats" class="text-xs text-slate-400 mt-2 font-mono">Parsing...</p>
                     </div>
                 </div>
             </div>
@@ -92,7 +102,6 @@
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
-
                     <div class="space-y-2">
                         <label class="block text-sm font-bold text-slate-700">Source Units</label>
                         <select id="sourceUnit" class="w-full p-3 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
@@ -102,7 +111,6 @@
                             <option value="ft">Feet (ft)</option>
                         </select>
                     </div>
-
                     <div class="space-y-2">
                         <label class="block text-sm font-bold text-slate-700">Paper Size & Orientation</label>
                         <div class="flex gap-2">
@@ -120,7 +128,6 @@
                             </select>
                         </div>
                     </div>
-
                     <div class="space-y-2">
                         <label class="block text-sm font-bold text-slate-700">Output Scale</label>
                         <div class="relative">
@@ -128,7 +135,6 @@
                             <span class="absolute right-10 top-3 text-slate-400 font-medium">%</span>
                         </div>
                     </div>
-
                     <div class="space-y-2">
                          <label class="block text-sm font-bold text-slate-700">Line Thickness</label>
                         <div class="flex items-center gap-3">
@@ -179,8 +185,8 @@
                                     <i data-lucide="calculator" class="w-6 h-6"></i>
                                 </div>
                                 <div>
-                                    <h3 class="font-bold text-slate-800">Estimated Output</h3>
-                                    <p class="text-sm text-slate-600">Geometry: <span id="dims" class="font-mono font-bold text-indigo-700">--</span></p>
+                                    <h3 class="font-bold text-slate-800">Final Output</h3>
+                                    <p class="text-sm text-slate-600">Scaled Size: <span id="dims" class="font-mono font-bold text-indigo-700">--</span></p>
                                 </div>
                             </div>
                             <div class="text-center md:text-right">
@@ -221,6 +227,7 @@
             fileInfo: document.getElementById('fileInfo'),
             fileName: document.getElementById('fileName'),
             fileStats: document.getElementById('fileStats'),
+            origDims: document.getElementById('origDims'), 
             generateBtn: document.getElementById('generateBtn'),
             previewArea: document.getElementById('previewArea'),
             dims: document.getElementById('dims'),
@@ -236,8 +243,10 @@
             marginLabels: document.getElementById('marginLabels'),
             debugMode: document.getElementById('debugMode'),
             shareBtn: document.getElementById('shareBtn'),
+            downloadSourceBtn: document.getElementById('downloadSourceBtn'), 
             loadingOverlay: document.getElementById('loadingOverlay'),
-            thumbnailCanvas: document.getElementById('thumbnailCanvas')
+            thumbnailCanvas: document.getElementById('thumbnailCanvas'),
+            gridCanvas: document.getElementById('gridCanvas')
         };
 
         els.fileInput.addEventListener('change', handleFileSelect);
@@ -248,6 +257,7 @@
         els.lineWidth.addEventListener('input', (e) => els.lineWidthVal.textContent = e.target.value);
         els.generateBtn.addEventListener('click', generatePDF);
         els.shareBtn.addEventListener('click', shareDesign);
+        els.downloadSourceBtn.addEventListener('click', downloadSourceDxf);
 
         window.addEventListener('load', checkForSharedUrl);
 
@@ -266,8 +276,8 @@
                         processLoadedDxf("shared_design.dxf");
                         window.history.replaceState({}, document.title, window.location.pathname);
                     } catch (e) {
-                        console.error(e);
-                        alert("Failed to load shared design. Link broken or too large.");
+                        console.error("Share Load Error:", e);
+                        alert("Failed to load shared design. Check console.");
                     } finally {
                         els.loadingOverlay.classList.add('hidden');
                     }
@@ -285,14 +295,27 @@
                 const baseUrl = window.location.href.split('?')[0];
                 const fullUrl = `${baseUrl}?dxf=${encodedB64}`;
                 if (fullUrl.length > 8000) {
-                    if (!confirm("This design creates a URL longer than 8000 characters. Some browsers might cut it off. Continue?")) return;
+                    if (!confirm(`URL is ${fullUrl.length} chars. Might be truncated. Continue?`)) return;
                 }
                 await navigator.clipboard.writeText(fullUrl);
                 const origIcon = els.shareBtn.innerHTML;
                 els.shareBtn.innerHTML = `<i data-lucide="check" class="w-6 h-6 text-green-500"></i>`;
                 setTimeout(() => els.shareBtn.innerHTML = origIcon, 2000);
-                alert("Link copied to clipboard!");
-            } catch (e) { console.error(e); alert("Could not create share link."); }
+                alert("Link copied!");
+            } catch (e) { console.error(e); alert("Share error."); }
+        }
+
+        function downloadSourceDxf() {
+            if (!dxfContent) return;
+            const blob = new Blob([dxfContent], { type: 'application/dxf' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = els.fileName.textContent || "design.dxf";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         }
 
         function handleFileSelect(event) {
@@ -301,87 +324,97 @@
             const reader = new FileReader();
             reader.onload = function(e) {
                 dxfContent = e.target.result;
+                console.log("File loaded, size:", dxfContent.length);
                 processLoadedDxf(file.name);
             };
             reader.readAsText(file);
         }
 
         function processLoadedDxf(filename) {
+            console.log("Processing DXF...");
             try {
                 if (typeof window.DxfParser === 'undefined') { alert("DXF Parser missing."); return; }
                 if(!dxfParser) dxfParser = new window.DxfParser();
-                parsedDxf = dxfParser.parseSync(dxfContent);
                 
+                parsedDxf = dxfParser.parseSync(dxfContent);
+                console.log("DXF Parsed Structure:", parsedDxf);
+                
+                if (!parsedDxf) { throw new Error("Parser returned null"); }
+                
+                const entCount = parsedDxf.entities ? parsedDxf.entities.length : 0;
+                const blkCount = parsedDxf.blocks ? Object.keys(parsedDxf.blocks).length : 0;
+                console.log(`Entities: ${entCount}, Blocks: ${blkCount}`);
+
                 els.fileName.textContent = filename;
                 els.uploadPlaceholder.classList.add('hidden');
                 els.fileInfo.classList.remove('hidden');
-                els.fileStats.textContent = "Ready.";
+                els.fileStats.textContent = `Parsed ${entCount} root entities.`;
+                
                 els.shareBtn.classList.remove('hidden');
+                els.downloadSourceBtn.classList.remove('hidden');
                 els.generateBtn.disabled = false;
                 els.generateBtn.classList.remove('bg-slate-300', 'text-slate-500');
                 els.generateBtn.classList.add('bg-blue-600', 'text-white', 'hover:bg-blue-700', 'shadow-xl');
                 
-                // GENERATE THUMBNAIL
-                generateThumbnail(parsedDxf.entities, parsedDxf.blocks);
-                
                 updatePreview();
                 lucide.createIcons();
             } catch(err) {
-                console.error(err);
-                alert("Error parsing DXF file.");
+                console.error("DXF Processing Error:", err);
+                alert("Error parsing DXF file. See console.");
             }
         }
 
-        // --- NEW THUMBNAIL GENERATOR ---
-        function generateThumbnail(entities, blocks) {
+        // --- VISUALIZATION HELPERS ---
+        function generateThumbnail(entities, blocks, gridLayout) {
+            console.log("Generating Thumbnail...");
             const canvas = els.thumbnailCanvas;
             const ctx = canvas.getContext('2d');
-            const bbox = getGlobalBBox(entities, blocks) || {minX:0, minY:0, maxX:100, maxY:100, w:100, h:100};
+            const bbox = getGlobalBBox(entities, blocks);
             
-            // Set canvas size (visual size is controlled by CSS, we set buffer size here)
-            canvas.width = 600;
-            canvas.height = 400;
+            if(!bbox) {
+                console.warn("No BBox found for thumbnail.");
+                return;
+            }
             
-            // Clear
+            // ROBUST FIX: Directly fetch container dimensions if 'els' reference failed or if hidden
+            const container = document.getElementById('thumbnailContainer');
+            const displayW = container ? container.clientWidth : 300;
+            const displayH = container ? container.clientHeight : 200;
+            
+            canvas.width = displayW * 2; 
+            canvas.height = displayH * 2;
+            
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            // Scale geometry to fit canvas
+            ctx.scale(2, 2); 
+
             const padding = 20;
-            const availW = canvas.width - (padding*2);
-            const availH = canvas.height - (padding*2);
+            const availW = displayW - (padding*2);
+            const availH = displayH - (padding*2);
             
             const scaleX = availW / bbox.w;
             const scaleY = availH / bbox.h;
             const scale = Math.min(scaleX, scaleY);
             
-            // Center it
             const contentW = bbox.w * scale;
             const contentH = bbox.h * scale;
-            const offsetX = (canvas.width - contentW) / 2;
-            const offsetY = (canvas.height - contentH) / 2; // Actually we need to flip Y
+            const offsetX = (displayW - contentW) / 2;
+            const offsetY = (displayH - contentH) / 2;
             
-            // Transform Function
-            // Canvas Y is down. DXF Y is up.
-            // ScreenX = (WorldX - MinX) * scale + offsetX
-            // ScreenY = (MaxY - WorldY) * scale + offsetY
+            // Transform: World -> Screen
             const tx = (x) => (x - bbox.minX) * scale + offsetX;
-            const ty = (y) => (bbox.maxY - y) * scale + offsetY;
+            const ty = (y) => (bbox.maxY - y) * scale + offsetY; 
 
-            ctx.strokeStyle = '#2563eb'; // Blue-600
+            ctx.strokeStyle = '#2563eb';
             ctx.lineWidth = 1.5;
             
             const drawEnts = (ents, blks, transform={x:0, y:0, scaleX:1, scaleY:1}) => {
                 if(!ents) return;
                 const localTx = (x) => (x * transform.scaleX) + transform.x;
                 const localTy = (y) => (y * transform.scaleY) + transform.y;
-                
                 ents.forEach(ent => {
                     try {
                         if(ent.type === 'LINE') {
-                            ctx.beginPath();
-                            ctx.moveTo(tx(localTx(ent.vertices[0].x)), ty(localTy(ent.vertices[0].y)));
-                            ctx.lineTo(tx(localTx(ent.vertices[1].x)), ty(localTy(ent.vertices[1].y)));
-                            ctx.stroke();
+                            ctx.beginPath(); ctx.moveTo(tx(localTx(ent.vertices[0].x)), ty(localTy(ent.vertices[0].y))); ctx.lineTo(tx(localTx(ent.vertices[1].x)), ty(localTy(ent.vertices[1].y))); ctx.stroke();
                         } else if (ent.type === 'LWPOLYLINE' || ent.type === 'POLYLINE') {
                             if(!ent.vertices || ent.vertices.length < 2) return;
                             ctx.beginPath();
@@ -390,36 +423,68 @@
                             for(let i=0; i<ent.vertices.length; i++) {
                                 let nextIdx = (i + 1) % ent.vertices.length;
                                 if (nextIdx === 0 && !ent.closed && !ent.shape) continue;
-                                const p1 = ent.vertices[i];
                                 const p2 = ent.vertices[nextIdx];
-                                
-                                // Simple bulge handling for preview (arc to curve)
-                                // We won't do perfect arcs for thumbnail, lines are fast
                                 ctx.lineTo(tx(localTx(p2.x)), ty(localTy(p2.y))); 
                             }
                             ctx.stroke();
                         } else if (ent.type === 'CIRCLE') {
-                            const cx = tx(localTx(ent.center.x));
-                            const cy = ty(localTy(ent.center.y));
-                            const r = ent.radius * scale * transform.scaleX; 
-                            ctx.beginPath();
-                            ctx.arc(cx, cy, r, 0, Math.PI*2);
-                            ctx.stroke();
+                            const cx = tx(localTx(ent.center.x)); const cy = ty(localTy(ent.center.y)); const r = ent.radius * scale * transform.scaleX; 
+                            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.stroke();
                         } else if (ent.type === 'INSERT' && blks && blks[ent.name]) {
                             const blk = blks[ent.name];
-                            const newTrans = {
-                                x: transform.x + ent.position.x,
-                                y: transform.y + ent.position.y,
-                                scaleX: transform.scaleX * (ent.xScale || 1),
-                                scaleY: transform.scaleY * (ent.yScale || 1)
-                            };
+                            const newTrans = { x: transform.x + ent.position.x, y: transform.y + ent.position.y, scaleX: transform.scaleX * (ent.xScale || 1), scaleY: transform.scaleY * (ent.yScale || 1) };
                             drawEnts(blk.entities, blks, newTrans);
                         }
                     } catch(e){}
                 });
             };
-            
             drawEnts(entities, blocks);
+
+            // --- GRID OVERLAY ---
+            if(gridLayout) {
+                const gCanvas = els.gridCanvas;
+                const gCtx = gCanvas.getContext('2d');
+                gCanvas.width = canvas.width; gCanvas.height = canvas.height;
+                gCtx.clearRect(0,0, gCanvas.width, gCanvas.height);
+                gCtx.scale(2, 2);
+
+                gCtx.strokeStyle = 'rgba(248, 113, 113, 0.6)'; 
+                gCtx.lineWidth = 1;
+                gCtx.setLineDash([4, 2]);
+
+                const { rows, cols, stepX, stepY, marginPts, printableW, printableH, globalShiftX, globalShiftY, pdfScale } = gridLayout;
+                
+                const pdfToScreenX = (px) => {
+                    const worldX = (px - globalShiftX) / pdfScale; 
+                    return tx(worldX);
+                };
+                const pdfToScreenY = (py) => {
+                    const worldY = (globalShiftY - py) / pdfScale;
+                    return ty(worldY);
+                };
+
+                for(let r=0; r<rows; r++) {
+                    for(let c=0; c<cols; c++) {
+                        const tileLeft = c * stepX + marginPts;
+                        const tileTop = r * stepY + marginPts;
+                        const tileRight = tileLeft + printableW;
+                        const tileBottom = tileTop + printableH;
+
+                        const sLeft = pdfToScreenX(tileLeft);
+                        const sRight = pdfToScreenX(tileRight);
+                        const sTop = pdfToScreenY(tileTop);
+                        const sBottom = pdfToScreenY(tileBottom);
+
+                        gCtx.beginPath();
+                        gCtx.moveTo(sLeft, sTop);
+                        gCtx.lineTo(sRight, sTop);
+                        gCtx.lineTo(sRight, sBottom);
+                        gCtx.lineTo(sLeft, sBottom);
+                        gCtx.closePath();
+                        gCtx.stroke();
+                    }
+                }
+            }
         }
 
         function safeAngle(a) { if (Math.abs(a) > 6.28318) return a * (Math.PI / 180); return a; }
@@ -574,6 +639,12 @@
             const result = calculateActiveTiles(bbox, scale, stepX, stepY, marginPts, printableW, printableH, globalShiftX, globalShiftY, parsedDxf.entities, parsedDxf.blocks);
             els.pageCount.innerHTML = `<span class="text-indigo-600">${result.activeCount} Pages</span> <span class="text-base font-normal text-slate-400">(Grid: ${result.cols} x ${result.rows})</span>`;
             els.previewArea.classList.remove('hidden');
+            
+            generateThumbnail(parsedDxf.entities, parsedDxf.blocks, {
+                rows: result.rows,
+                cols: result.cols,
+                stepX, stepY, marginPts, printableW, printableH, globalShiftX, globalShiftY, pdfScale: scale 
+            });
         }
 
         async function generatePDF() {
