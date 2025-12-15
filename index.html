@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fusion 360 DXF Tiler v14 (Sharing Fix)</title>
+    <title>Fusion 360 DXF Tiler v15 (Thumbnail Preview)</title>
     <!-- Tailwind CDN is used for single-file portability. Warning in console is expected/safe for this tool. -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
@@ -28,7 +28,7 @@
                 <i data-lucide="printer" class="w-8 h-8 text-blue-600"></i>
                 Fusion 360 DXF Tiler
             </h1>
-            <p class="text-slate-600">Convert CAD sketches to tiled PDFs. <span class="text-teal-600 font-semibold text-xs bg-teal-50 px-2 py-1 rounded-full">v14 Sharing Fix</span></p>
+            <p class="text-slate-600">Convert CAD sketches to tiled PDFs. <span class="text-violet-600 font-semibold text-xs bg-violet-50 px-2 py-1 rounded-full">v15 Thumbnail Preview</span></p>
 
             <button id="shareBtn" class="absolute top-6 right-6 text-slate-400 hover:text-blue-600 transition-colors hidden" title="Share Design URL">
                 <i data-lucide="share-2" class="w-6 h-6"></i>
@@ -66,12 +66,18 @@
                         <p class="text-slate-700 font-semibold text-lg">Click to browse or drag file here</p>
                     </div>
 
-                    <div id="fileInfo" class="hidden">
-                        <div class="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <div id="fileInfo" class="hidden flex flex-col items-center">
+                        <div class="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-4">
                             <i data-lucide="check" class="w-8 h-8"></i>
                         </div>
                         <p class="text-slate-900 font-bold text-xl" id="fileName">filename.dxf</p>
-                        <p class="text-sm text-slate-500 mt-2 font-mono bg-slate-100 inline-block px-3 py-1 rounded-md" id="fileStats">Parsing...</p>
+                        <p class="text-sm text-slate-500 mt-1 mb-6 font-mono bg-slate-100 inline-block px-3 py-1 rounded-md" id="fileStats">Parsing...</p>
+
+                        <!-- Thumbnail Container -->
+                        <div id="thumbnailContainer" class="w-full max-w-sm h-48 border border-slate-200 rounded-lg bg-slate-50 flex items-center justify-center overflow-hidden relative">
+                            <canvas id="thumbnailCanvas" class="max-w-full max-h-full"></canvas>
+                            <div class="absolute bottom-2 right-2 bg-white/80 px-2 py-1 text-xs rounded text-slate-500 font-mono">Preview</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -230,7 +236,8 @@
             marginLabels: document.getElementById('marginLabels'),
             debugMode: document.getElementById('debugMode'),
             shareBtn: document.getElementById('shareBtn'),
-            loadingOverlay: document.getElementById('loadingOverlay')
+            loadingOverlay: document.getElementById('loadingOverlay'),
+            thumbnailCanvas: document.getElementById('thumbnailCanvas')
         };
 
         els.fileInput.addEventListener('change', handleFileSelect);
@@ -249,30 +256,18 @@
             const sharedData = params.get('dxf');
             if (sharedData) {
                 els.loadingOverlay.classList.remove('hidden');
-                
-                // 100ms delay helps UI render the loader before heavy JS blocks the thread
                 setTimeout(() => {
                     try {
-                        // FIX: URLSearchParams correctly handles + as space if not encoded.
-                        // We must assume the URL generator (shareDesign) now uses encodeURIComponent.
-                        // If the previous link was broken, this fix ensures NEW links work.
-                        
-                        // Clean any spaces that might have occurred from bad copy-paste or lack of encoding previously
-                        // Although typically URLSearchParams decoding is the issue.
-                        
                         const binaryString = atob(sharedData);
                         const charData = binaryString.split('').map(x => x.charCodeAt(0));
                         const binData = new Uint8Array(charData);
                         const decompressed = pako.ungzip(binData, { to: 'string' });
-                        
                         dxfContent = decompressed;
                         processLoadedDxf("shared_design.dxf");
-                        
-                        // Clean URL to avoid re-parsing on refresh
                         window.history.replaceState({}, document.title, window.location.pathname);
                     } catch (e) {
                         console.error(e);
-                        alert("Failed to load shared design. The link may be broken or the file was too large for the URL.");
+                        alert("Failed to load shared design. Link broken or too large.");
                     } finally {
                         els.loadingOverlay.classList.add('hidden');
                     }
@@ -282,42 +277,27 @@
 
         async function shareDesign() {
             if (!dxfContent) return;
-            
             try {
                 const compressed = pako.gzip(dxfContent);
                 const binaryString = Array.from(compressed, byte => String.fromCharCode(byte)).join('');
                 const b64 = btoa(binaryString);
-                
-                // CRITICAL FIX: encodeURIComponent preserves the '+' characters in Base64
-                // when put into a URL query parameter. Without this, + becomes space.
                 const encodedB64 = encodeURIComponent(b64);
-                
                 const baseUrl = window.location.href.split('?')[0];
                 const fullUrl = `${baseUrl}?dxf=${encodedB64}`;
-                
                 if (fullUrl.length > 8000) {
-                    if (!confirm("This design creates a URL longer than 8000 characters. Some browsers or messaging apps might cut it off. Continue?")) {
-                        return;
-                    }
+                    if (!confirm("This design creates a URL longer than 8000 characters. Some browsers might cut it off. Continue?")) return;
                 }
-
                 await navigator.clipboard.writeText(fullUrl);
-                
                 const origIcon = els.shareBtn.innerHTML;
                 els.shareBtn.innerHTML = `<i data-lucide="check" class="w-6 h-6 text-green-500"></i>`;
                 setTimeout(() => els.shareBtn.innerHTML = origIcon, 2000);
                 alert("Link copied to clipboard!");
-                
-            } catch (e) {
-                console.error(e);
-                alert("Could not create share link.");
-            }
+            } catch (e) { console.error(e); alert("Could not create share link."); }
         }
 
         function handleFileSelect(event) {
             const file = event.target.files[0];
             if (!file) return;
-            
             const reader = new FileReader();
             reader.onload = function(e) {
                 dxfContent = e.target.result;
@@ -328,11 +308,7 @@
 
         function processLoadedDxf(filename) {
             try {
-                if (typeof window.DxfParser === 'undefined') {
-                    alert("DXF Parser library missing.");
-                    return;
-                }
-                
+                if (typeof window.DxfParser === 'undefined') { alert("DXF Parser missing."); return; }
                 if(!dxfParser) dxfParser = new window.DxfParser();
                 parsedDxf = dxfParser.parseSync(dxfContent);
                 
@@ -341,10 +317,12 @@
                 els.fileInfo.classList.remove('hidden');
                 els.fileStats.textContent = "Ready.";
                 els.shareBtn.classList.remove('hidden');
-                
                 els.generateBtn.disabled = false;
                 els.generateBtn.classList.remove('bg-slate-300', 'text-slate-500');
                 els.generateBtn.classList.add('bg-blue-600', 'text-white', 'hover:bg-blue-700', 'shadow-xl');
+                
+                // GENERATE THUMBNAIL
+                generateThumbnail(parsedDxf.entities, parsedDxf.blocks);
                 
                 updatePreview();
                 lucide.createIcons();
@@ -354,48 +332,121 @@
             }
         }
 
-        function safeAngle(a) {
-            if (Math.abs(a) > 6.28318) return a * (Math.PI / 180);
-            return a;
+        // --- NEW THUMBNAIL GENERATOR ---
+        function generateThumbnail(entities, blocks) {
+            const canvas = els.thumbnailCanvas;
+            const ctx = canvas.getContext('2d');
+            const bbox = getGlobalBBox(entities, blocks) || {minX:0, minY:0, maxX:100, maxY:100, w:100, h:100};
+            
+            // Set canvas size (visual size is controlled by CSS, we set buffer size here)
+            canvas.width = 600;
+            canvas.height = 400;
+            
+            // Clear
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Scale geometry to fit canvas
+            const padding = 20;
+            const availW = canvas.width - (padding*2);
+            const availH = canvas.height - (padding*2);
+            
+            const scaleX = availW / bbox.w;
+            const scaleY = availH / bbox.h;
+            const scale = Math.min(scaleX, scaleY);
+            
+            // Center it
+            const contentW = bbox.w * scale;
+            const contentH = bbox.h * scale;
+            const offsetX = (canvas.width - contentW) / 2;
+            const offsetY = (canvas.height - contentH) / 2; // Actually we need to flip Y
+            
+            // Transform Function
+            // Canvas Y is down. DXF Y is up.
+            // ScreenX = (WorldX - MinX) * scale + offsetX
+            // ScreenY = (MaxY - WorldY) * scale + offsetY
+            const tx = (x) => (x - bbox.minX) * scale + offsetX;
+            const ty = (y) => (bbox.maxY - y) * scale + offsetY;
+
+            ctx.strokeStyle = '#2563eb'; // Blue-600
+            ctx.lineWidth = 1.5;
+            
+            const drawEnts = (ents, blks, transform={x:0, y:0, scaleX:1, scaleY:1}) => {
+                if(!ents) return;
+                const localTx = (x) => (x * transform.scaleX) + transform.x;
+                const localTy = (y) => (y * transform.scaleY) + transform.y;
+                
+                ents.forEach(ent => {
+                    try {
+                        if(ent.type === 'LINE') {
+                            ctx.beginPath();
+                            ctx.moveTo(tx(localTx(ent.vertices[0].x)), ty(localTy(ent.vertices[0].y)));
+                            ctx.lineTo(tx(localTx(ent.vertices[1].x)), ty(localTy(ent.vertices[1].y)));
+                            ctx.stroke();
+                        } else if (ent.type === 'LWPOLYLINE' || ent.type === 'POLYLINE') {
+                            if(!ent.vertices || ent.vertices.length < 2) return;
+                            ctx.beginPath();
+                            const p0 = ent.vertices[0];
+                            ctx.moveTo(tx(localTx(p0.x)), ty(localTy(p0.y)));
+                            for(let i=0; i<ent.vertices.length; i++) {
+                                let nextIdx = (i + 1) % ent.vertices.length;
+                                if (nextIdx === 0 && !ent.closed && !ent.shape) continue;
+                                const p1 = ent.vertices[i];
+                                const p2 = ent.vertices[nextIdx];
+                                
+                                // Simple bulge handling for preview (arc to curve)
+                                // We won't do perfect arcs for thumbnail, lines are fast
+                                ctx.lineTo(tx(localTx(p2.x)), ty(localTy(p2.y))); 
+                            }
+                            ctx.stroke();
+                        } else if (ent.type === 'CIRCLE') {
+                            const cx = tx(localTx(ent.center.x));
+                            const cy = ty(localTy(ent.center.y));
+                            const r = ent.radius * scale * transform.scaleX; 
+                            ctx.beginPath();
+                            ctx.arc(cx, cy, r, 0, Math.PI*2);
+                            ctx.stroke();
+                        } else if (ent.type === 'INSERT' && blks && blks[ent.name]) {
+                            const blk = blks[ent.name];
+                            const newTrans = {
+                                x: transform.x + ent.position.x,
+                                y: transform.y + ent.position.y,
+                                scaleX: transform.scaleX * (ent.xScale || 1),
+                                scaleY: transform.scaleY * (ent.yScale || 1)
+                            };
+                            drawEnts(blk.entities, blks, newTrans);
+                        }
+                    } catch(e){}
+                });
+            };
+            
+            drawEnts(entities, blocks);
         }
+
+        function safeAngle(a) { if (Math.abs(a) > 6.28318) return a * (Math.PI / 180); return a; }
 
         function getEntityBBox(ent, transform) {
             const tx = (x) => (x * transform.scaleX) + transform.x;
             const ty = (y) => (y * transform.scaleY) + transform.y;
-
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
             const update = (x, y) => {
                 const px = tx(x), py = ty(y);
                 if(px < minX) minX = px; if(py < minY) minY = py;
                 if(px > maxX) maxX = px; if(py > maxY) maxY = py;
             };
-
             try {
-                if(ent.type === 'LINE') {
-                    ent.vertices.forEach(v => update(v.x, v.y));
-                } else if (ent.type === 'LWPOLYLINE' || ent.type === 'POLYLINE') {
-                    if(ent.vertices) ent.vertices.forEach(v => update(v.x, v.y));
-                } else if (ent.type === 'CIRCLE') {
-                    const r = ent.radius;
-                    update(ent.center.x - r, ent.center.y - r);
-                    update(ent.center.x + r, ent.center.y + r);
-                } else if (ent.type === 'ARC') {
-                    let start = safeAngle(ent.startAngle);
-                    let end = safeAngle(ent.endAngle);
-                    const r = ent.radius;
-                    const cx = ent.center.x;
-                    const cy = ent.center.y;
+                if(ent.type === 'LINE') { ent.vertices.forEach(v => update(v.x, v.y)); } 
+                else if (ent.type === 'LWPOLYLINE' || ent.type === 'POLYLINE') { if(ent.vertices) ent.vertices.forEach(v => update(v.x, v.y)); } 
+                else if (ent.type === 'CIRCLE') { const r = ent.radius; update(ent.center.x - r, ent.center.y - r); update(ent.center.x + r, ent.center.y + r); } 
+                else if (ent.type === 'ARC') {
+                    let start = safeAngle(ent.startAngle); let end = safeAngle(ent.endAngle);
+                    const r = ent.radius; const cx = ent.center.x; const cy = ent.center.y;
                     update(cx + r * Math.cos(start), cy + r * Math.sin(start));
                     update(cx + r * Math.cos(end), cy + r * Math.sin(end));
                     if (end < start) end += Math.PI * 2;
-                    const checkAngle = (a) => {
-                        while(a < start) a += Math.PI * 2;
-                        if(a <= end) update(cx + r * Math.cos(a), cy + r * Math.sin(a));
-                    };
+                    const checkAngle = (a) => { while(a < start) a += Math.PI * 2; if(a <= end) update(cx + r * Math.cos(a), cy + r * Math.sin(a)); };
                     checkAngle(0); checkAngle(Math.PI/2); checkAngle(Math.PI); checkAngle(3*Math.PI/2);
                 }
             } catch(e) {}
-            
             if (minX === Infinity) return null;
             return { minX, minY, maxX, maxY };
         }
@@ -407,23 +458,12 @@
             entities.forEach(ent => {
                 if(ent.type === 'INSERT' && blocks && blocks[ent.name]) {
                     const block = blocks[ent.name];
-                    const subTransform = {
-                        x: transform.x + ent.position.x, y: transform.y + ent.position.y,
-                        scaleX: transform.scaleX * (ent.xScale || 1), scaleY: transform.scaleY * (ent.yScale || 1)
-                    };
+                    const subTransform = { x: transform.x + ent.position.x, y: transform.y + ent.position.y, scaleX: transform.scaleX * (ent.xScale || 1), scaleY: transform.scaleY * (ent.yScale || 1) };
                     const bBox = getGlobalBBox(block.entities, blocks, subTransform);
-                    if(bBox) {
-                         if(bBox.minX < minX) minX = bBox.minX; if(bBox.minY < minY) minY = bBox.minY;
-                         if(bBox.maxX > maxX) maxX = bBox.maxX; if(bBox.maxY > maxY) maxY = bBox.maxY;
-                         hasGeo = true;
-                    }
+                    if(bBox) { if(bBox.minX < minX) minX = bBox.minX; if(bBox.minY < minY) minY = bBox.minY; if(bBox.maxX > maxX) maxX = bBox.maxX; if(bBox.maxY > maxY) maxY = bBox.maxY; hasGeo = true; }
                 } else {
                     const bBox = getEntityBBox(ent, transform);
-                    if(bBox) {
-                         if(bBox.minX < minX) minX = bBox.minX; if(bBox.minY < minY) minY = bBox.minY;
-                         if(bBox.maxX > maxX) maxX = bBox.maxX; if(bBox.maxY > maxY) maxY = bBox.maxY;
-                         hasGeo = true;
-                    }
+                    if(bBox) { if(bBox.minX < minX) minX = bBox.minX; if(bBox.minY < minY) minY = bBox.minY; if(bBox.maxX > maxX) maxX = bBox.maxX; if(bBox.maxY > maxY) maxY = bBox.maxY; hasGeo = true; }
                 }
             });
             if (!hasGeo) return null;
@@ -442,10 +482,7 @@
                 const addBox = (p1, p2) => {
                     const x1 = toPdfX(p1.x), y1 = toPdfY(p1.y);
                     const x2 = toPdfX(p2.x), y2 = toPdfY(p2.y);
-                    flatEntities.push({
-                        minX: Math.min(x1, x2), maxX: Math.max(x1, x2),
-                        minY: Math.min(y1, y2), maxY: Math.max(y1, y2)
-                    });
+                    flatEntities.push({ minX: Math.min(x1, x2), maxX: Math.max(x1, x2), minY: Math.min(y1, y2), maxY: Math.max(y1, y2) });
                 };
                 try {
                     if(ent.type === 'LINE') {
