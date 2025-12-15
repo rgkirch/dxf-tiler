@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fusion 360 DXF Tiler v13 (Shareable)</title>
+    <title>Fusion 360 DXF Tiler v14 (Sharing Fix)</title>
+    <!-- Tailwind CDN is used for single-file portability. Warning in console is expected/safe for this tool. -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://unpkg.com/dxf-parser@1.1.2/dist/dxf-parser.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <!-- Pako for GZIP compression to make URLs shorter -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -18,7 +18,6 @@
             background-size: 20px 20px;
         }
         .animate-fade-in { animation: fadeIn 0.5s ease-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body class="bg-slate-50 min-h-screen text-slate-800 pattern-bg">
@@ -29,8 +28,8 @@
                 <i data-lucide="printer" class="w-8 h-8 text-blue-600"></i>
                 Fusion 360 DXF Tiler
             </h1>
-            <p class="text-slate-600">Convert CAD sketches to tiled PDFs. <span class="text-cyan-600 font-semibold text-xs bg-cyan-50 px-2 py-1 rounded-full">v13 Shareable</span></p>
-            
+            <p class="text-slate-600">Convert CAD sketches to tiled PDFs. <span class="text-teal-600 font-semibold text-xs bg-teal-50 px-2 py-1 rounded-full">v14 Sharing Fix</span></p>
+
             <button id="shareBtn" class="absolute top-6 right-6 text-slate-400 hover:text-blue-600 transition-colors hidden" title="Share Design URL">
                 <i data-lucide="share-2" class="w-6 h-6"></i>
             </button>
@@ -59,7 +58,7 @@
 
                 <div class="group border-2 border-dashed border-slate-300 rounded-xl p-10 text-center hover:bg-blue-50/50 hover:border-blue-400 transition-all relative cursor-pointer">
                     <input type="file" id="dxfInput" accept=".dxf" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
-                    
+
                     <div id="uploadPlaceholder" class="transition-opacity duration-200">
                         <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
                             <i data-lucide="upload-cloud" class="w-8 h-8"></i>
@@ -87,7 +86,7 @@
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
-                    
+
                     <div class="space-y-2">
                         <label class="block text-sm font-bold text-slate-700">Source Units</label>
                         <select id="sourceUnit" class="w-full p-3 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
@@ -243,7 +242,6 @@
         els.generateBtn.addEventListener('click', generatePDF);
         els.shareBtn.addEventListener('click', shareDesign);
 
-        // --- URL SHARING LOGIC ---
         window.addEventListener('load', checkForSharedUrl);
 
         function checkForSharedUrl() {
@@ -252,26 +250,29 @@
             if (sharedData) {
                 els.loadingOverlay.classList.remove('hidden');
                 
-                // Slight delay to allow UI to render
+                // 100ms delay helps UI render the loader before heavy JS blocks the thread
                 setTimeout(() => {
                     try {
-                        // 1. Base64 Decode
+                        // FIX: URLSearchParams correctly handles + as space if not encoded.
+                        // We must assume the URL generator (shareDesign) now uses encodeURIComponent.
+                        // If the previous link was broken, this fix ensures NEW links work.
+                        
+                        // Clean any spaces that might have occurred from bad copy-paste or lack of encoding previously
+                        // Although typically URLSearchParams decoding is the issue.
+                        
                         const binaryString = atob(sharedData);
-                        // 2. Convert to Uint8Array
                         const charData = binaryString.split('').map(x => x.charCodeAt(0));
                         const binData = new Uint8Array(charData);
-                        // 3. Gunzip
                         const decompressed = pako.ungzip(binData, { to: 'string' });
                         
-                        // Load it
                         dxfContent = decompressed;
                         processLoadedDxf("shared_design.dxf");
                         
-                        // Clean URL
+                        // Clean URL to avoid re-parsing on refresh
                         window.history.replaceState({}, document.title, window.location.pathname);
                     } catch (e) {
                         console.error(e);
-                        alert("Failed to load shared design. Link might be broken or too old.");
+                        alert("Failed to load shared design. The link may be broken or the file was too large for the URL.");
                     } finally {
                         els.loadingOverlay.classList.add('hidden');
                     }
@@ -283,27 +284,25 @@
             if (!dxfContent) return;
             
             try {
-                // 1. Gzip
                 const compressed = pako.gzip(dxfContent);
-                // 2. Base64 (using FileReader for robust binary to b64)
-                // Actually, simple btoa on Uint8Array is tricky. 
-                // Let's use a helper for binary -> b64 string
                 const binaryString = Array.from(compressed, byte => String.fromCharCode(byte)).join('');
                 const b64 = btoa(binaryString);
                 
-                const baseUrl = window.location.href.split('?')[0];
-                const fullUrl = `${baseUrl}?dxf=${b64}`;
+                // CRITICAL FIX: encodeURIComponent preserves the '+' characters in Base64
+                // when put into a URL query parameter. Without this, + becomes space.
+                const encodedB64 = encodeURIComponent(b64);
                 
-                // URL Length Warning
+                const baseUrl = window.location.href.split('?')[0];
+                const fullUrl = `${baseUrl}?dxf=${encodedB64}`;
+                
                 if (fullUrl.length > 8000) {
-                    if (!confirm("This design is quite large. The sharing link might not work in all browsers/messengers. Create link anyway?")) {
+                    if (!confirm("This design creates a URL longer than 8000 characters. Some browsers or messaging apps might cut it off. Continue?")) {
                         return;
                     }
                 }
 
                 await navigator.clipboard.writeText(fullUrl);
                 
-                // Visual feedback
                 const origIcon = els.shareBtn.innerHTML;
                 els.shareBtn.innerHTML = `<i data-lucide="check" class="w-6 h-6 text-green-500"></i>`;
                 setTimeout(() => els.shareBtn.innerHTML = origIcon, 2000);
@@ -337,7 +336,6 @@
                 if(!dxfParser) dxfParser = new window.DxfParser();
                 parsedDxf = dxfParser.parseSync(dxfContent);
                 
-                // Update UI
                 els.fileName.textContent = filename;
                 els.uploadPlaceholder.classList.add('hidden');
                 els.fileInfo.classList.remove('hidden');
@@ -349,15 +347,13 @@
                 els.generateBtn.classList.add('bg-blue-600', 'text-white', 'hover:bg-blue-700', 'shadow-xl');
                 
                 updatePreview();
-                lucide.createIcons(); // Refresh new icons
+                lucide.createIcons();
             } catch(err) {
                 console.error(err);
                 alert("Error parsing DXF file.");
             }
         }
 
-        // --- [PRESERVED: GEOMETRY ENGINE V12] ---
-        
         function safeAngle(a) {
             if (Math.abs(a) > 6.28318) return a * (Math.PI / 180);
             return a;
